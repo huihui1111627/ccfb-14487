@@ -1,0 +1,22 @@
+{
+  "name": "quad-socket-seis-node",
+  "comment": "四路机器，每路 2 个内存节点，共 8 NUMA；每节点 12 物理核 x 2 超线程 = 48 逻辑核/节点，整机 384 逻辑核；采集卡和加速卡分散挂在不同插槽",
+  "sockets": [
+    { "nodes": 2, "coresPerNode": 12, "smt": 2, "memoryMBPerNode": 65536, "hugepagesPerNode": 2048 },
+    { "nodes": 2, "coresPerNode": 12, "smt": 2, "memoryMBPerNode": 65536, "hugepagesPerNode": 2048 },
+    { "nodes": 2, "coresPerNode": 12, "smt": 2, "memoryMBPerNode": 65536, "hugepagesPerNode": 2048 },
+    { "nodes": 2, "coresPerNode": 12, "smt": 2, "memoryMBPerNode": 65536, "hugepagesPerNode": 2048 }
+  ],
+  "devices": [
+    { "id": "acq0", "kind": "acq",   "node": 0, "shareable": false },
+    { "id": "acq1", "kind": "acq",   "node": 4, "shareable": false },
+    { "id": "gpu0", "kind": "accel", "node": 2, "shareable": true  },
+    { "id": "gpu1", "kind": "accel", "node": 6, "shareable": true  }
+  ],
+  "distances": {
+    "0-1": 12, "2-3": 12, "4-5": 12, "6-7": 12,
+    "0-2": 20, "0-4": 22, "0-6": 22,
+    "2-4": 22, "2-6": 22,
+    "4-6": 20
+  }
+}

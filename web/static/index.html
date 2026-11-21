@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>节点资源拓扑管理器</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
+    --muted: #8b949e; --accent: #58a6ff; --warn: #d29922; --bad: #f85149;
+    --good: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", monospace; }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border);
+           display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  .badge { padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border);
+           background: var(--panel); color: var(--muted); }
+  .badge.dumb { border-color: var(--bad); color: var(--bad); }
+  .grid { display: grid; grid-template-columns: 1fr 360px; gap: 14px; padding: 14px 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+  .panel h2 { font-size: 13px; margin: 0 0 10px; color: var(--accent);
+              text-transform: uppercase; letter-spacing: .5px; }
+  .socket { border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+            margin-bottom: 12px; background: #11161d; }
+  .socket > .title { font-weight: 700; margin-bottom: 8px; color: #f0b429; }
+  .nodes { display: flex; gap: 10px; flex-wrap: wrap; }
+  .node { flex: 1 1 320px; min-width: 300px; border: 1px solid var(--border);
+          border-radius: 6px; padding: 8px; background: var(--panel); }
+  .node .nhead { display: flex; justify-content: space-between; margin-bottom: 6px;
+                 font-weight: 700; }
+  .node .meta { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  .cores { display: flex; flex-wrap: wrap; gap: 4px; }
+  .core { display: flex; border: 1px solid var(--border); border-radius: 4px;
+          overflow: hidden; }
+  .core.split { border-color: var(--warn); }
+  .cpu { width: 15px; height: 22px; display: flex; align-items: center;
+         justify-content: center; font-size: 9px; color: #000; }
+  .cpu.free { background: #21262d; color: var(--muted); }
+  .cpu.reserved { background: #6e7681; color: #fff; }
+  .cpu.shared { background: repeating-linear-gradient(45deg,#30363d,#30363d 3px,#21262d 3px,#21262d 6px); }
+  .cpu.exclusive { font-weight: 700; }
+  .devs { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .dev { font-size: 11px; padding: 1px 7px; border-radius: 8px;
+         border: 1px solid var(--border); }
+  .dev.acq { color: #ff9ce1; border-color: #66395c; }
+  .dev.accel { color: #79c0ff; border-color: #1f4e79; }
+  .dev.held { background: #3d2b4d; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td, th { padding: 4px 6px; border-bottom: 1px solid var(--border);
+           text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+         margin-right: 5px; vertical-align: middle; }
+  .kv { display: flex; justify-content: space-between; padding: 2px 0; }
+  .kv b { color: var(--good); }
+  .reject { color: var(--bad); }
+  .events { max-height: 260px; overflow-y: auto; font-size: 11px; }
+  .events .ev { padding: 2px 0; border-bottom: 1px dotted var(--border); }
+  .ev.start .k { color: var(--good); }
+  .ev.reject .k { color: var(--bad); }
+  .ev.release .k { color: var(--accent); }
+  .ev.refresh .k { color: var(--warn); }
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px;
+            color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .swatch { width: 12px; height: 12px; border-radius: 2px; }
+  .matrix td { text-align: center; padding: 2px 5px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>节点资源拓扑管理器</h1>
+  <span class="badge" id="toponame">-</span>
+  <span class="badge" id="mode">-</span>
+  <span class="badge">共享池版本 <b id="poolver">0</b></span>
+  <span class="badge">刷新 1s</span>
+</header>
+
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>硬件拓扑与容器占用</h2>
+      <div class="legend">
+        <span><i class="swatch" style="background:#21262d"></i>空闲/共享池</span>
+        <span><i class="swatch" style="background:#6e7681"></i>守护进程预留</span>
+        <span><i class="swatch" style="background:repeating-linear-gradient(45deg,#30363d,#30363d 3px,#21262d 3px,#21262d 6px)"></i>共享(超分)</span>
+        <span><i class="swatch" style="background:var(--warn)"></i>物理核被拆散(黄框)</span>
+        <span>彩色 = 独占容器，同容器同色，两个兄弟格同色表示整核分配</span>
+      </div>
+    </div>
+    <div id="sockets"></div>
+    <div class="panel">
+      <h2>NUMA 距离矩阵 (SLIT, 10=本地)</h2>
+      <table class="matrix" id="matrix"></table>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>验收指标</h2>
+      <div id="metrics"></div>
+    </div>
+    <div class="panel">
+      <h2>物理核拆散程度</h2>
+      <div id="frag"></div>
+    </div>
+    <div class="panel">
+      <h2>容器 (<span id="ncont">0</span>)</h2>
+      <table id="containers"><thead>
+        <tr><th>容器</th><th>节点</th><th>核/池</th><th>设备</th><th>策略</th></tr>
+      </thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <h2>事件流</h2>
+      <div class="events" id="events"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLORS = ["#ff7b72","#d2a8ff","#79c0ff","#7ee787","#ffa657","#f0883e",
+  "#56d4dd","#ff9ce1","#a5d6ff","#e3b341","#bc8cff","#61dafb"];
+const color = i => COLORS[i % COLORS.length];
+
+async function tick() {
+  const res = await fetch("/api/state");
+  const s = await res.json();
+  document.getElementById("toponame").textContent = s.topoName;
+  const mode = document.getElementById("mode");
+  mode.textContent = s.dumb ? "对照: 忽略拓扑" : "拓扑感知分配";
+  mode.className = "badge" + (s.dumb ? " dumb" : "");
+  document.getElementById("poolver").textContent = s.poolVersion;
+
+  // sockets / nodes / cores
+  const root = document.getElementById("sockets");
+  root.innerHTML = "";
+  for (const sock of s.sockets) {
+    const sd = document.createElement("div");
+    sd.className = "socket";
+    sd.innerHTML = `<div class="title">处理器插槽 Socket ${sock.id}</div>`;
+    const nodes = document.createElement("div");
+    nodes.className = "nodes";
+    for (const n of sock.nodes) {
+      const nd = document.createElement("div");
+      nd.className = "node";
+      const devHtml = n.devices.map(did => {
+        const d = s.devices.find(x => x.id === did);
+        const held = d && (d.holder || d.holders > 0);
+        return `<span class="dev ${d.kind} ${held ? "held" : ""}" title="${held ? "占用中" : "空闲"}">${did} [${d.kind}]</span>`;
+      }).join("");
+      nd.innerHTML = `
+        <div class="nhead"><span>内存节点 Node ${n.id}</span></div>
+        <div class="meta">内存 ${n.freeMemMB}/${n.totalMemMB} MB 空闲 ·
+          大页 ${n.freeHugepages}/${n.totalHugepages} 空闲</div>
+        <div class="cores">${n.cores.map(c => `
+          <div class="core ${c.split ? "split" : ""}" title="物理核 ${c.id}${c.split ? " (已拆散)" : ""}">
+            ${c.siblings.map(cpu => cellHtml(cpu)).join("")}
+          </div>`).join("")}
+        </div>
+        <div class="devs">${devHtml}</div>`;
+      nodes.appendChild(nd);
+    }
+    sd.appendChild(nodes);
+    root.appendChild(sd);
+  }
+
+  // distance matrix
+  const m = s.distances;
+  let mh = "<tr><th></th>" + m.map((_, j) => `<th>N${j}</th>`).join("") + "</tr>";
+  m.forEach((row, i) => {
+    mh += `<tr><th>N${i}</th>` + row.map(v =>
+      `<td style="color:${v === 10 ? "var(--good)" : v >= 20 ? "var(--bad)" : "var(--warn)"}">${v}</td>`
+    ).join("") + "</tr>";
+  });
+  document.getElementById("matrix").innerHTML = mh;
+
+  // metrics
+  const st = s.stats;
+  const rate = st.requests ? (100 * st.accepted / st.requests).toFixed(1) : "0.0";
+  const rej = st.requests ? (100 * st.rejected / st.requests).toFixed(1) : "0.0";
+  document.getElementById("metrics").innerHTML = `
+    <div class="kv"><span>请求总数</span><b>${st.requests}</b></div>
+    <div class="kv"><span>接受 / 拒绝率</span><b>${rate}% / <span class="reject">${rej}%</span></b></div>
+    <div class="kv"><span>容器组请求 / 接受</span><b>${st.groupRequests} / ${st.groupAccepted}</b></div>
+    <div class="kv"><span>拒绝原因</span></div>
+    ${Object.entries(st.rejectReasons || {}).map(([k, v]) =>
+      `<div class="kv reject" style="padding-left:10px"><span>${k}</span><b>${v}</b></div>`).join("")}`;
+
+  // fragmentation
+  const f = s.frag;
+  document.getElementById("frag").innerHTML = `
+    <div class="kv"><span>物理核总数</span><b>${f.totalCores}</b></div>
+    <div class="kv"><span>完整核 / 拆散核</span><b>${f.wholeCores} / <span style="color:var(--warn)">${f.splitCores}</span></b></div>
+    <div class="kv"><span>拆散比例</span><b>${f.fragmentationPct.toFixed(1)}%</b></div>
+    <div class="kv"><span>游离超线程槽占比</span><b>${f.looseSiblingPct.toFixed(1)}%</b></div>`;
+
+  // containers
+  document.getElementById("ncont").textContent = s.containers.length;
+  document.querySelector("#containers tbody").innerHTML = s.containers.map(c => `
+    <tr>
+      <td><span class="dot" style="background:${color(c.colorIdx)}"></span>${c.id}
+        ${c.groupID ? `<div class="meta">组 ${c.groupID}</div>` : ""}
+        ${c.shared ? '<div class="meta">共享/超分</div>' : ""}
+        ${c.allPreferred ? '<div style="color:var(--good)">全维度偏好命中</div>' : ""}</td>
+      <td>${c.nodes}</td>
+      <td>${c.shared ? "池内 " + c.sharedCPUs + " 核" : c.cpus.length + " 核"}
+        <div class="meta">${c.shared ? "" : c.cpus.join(",")}</div></td>
+      <td>${(c.devices || []).join(", ") || "-"}</td>
+      <td>${c.policy}</td>
+    </tr>`).join("");
+
+  // events (newest first)
+  document.getElementById("events").innerHTML = (s.events || []).slice().reverse().map(e => `
+    <div class="ev ${e.kind}"><span class="k">${e.kind}</span>
+      <b>${e.id}</b> ${e.nodes ? "→ " + e.nodes : ""} ${e.detail || ""}</div>`).join("");
+}
+
+function cellHtml(cpu) {
+  if (cpu.state === "free")
+    return `<div class="cpu free" title="逻辑CPU ${cpu.id}: 共享池"></div>`;
+  if (cpu.state === "reserved")
+    return `<div class="cpu reserved" title="逻辑CPU ${cpu.id}: 守护进程"></div>`;
+  if (cpu.state === "shared")
+    return `<div class="cpu shared" title="逻辑CPU ${cpu.id}: 共享池"></div>`;
+  return `<div class="cpu exclusive" style="background:${color(cpu.colorIdx)}"
+    title="逻辑CPU ${cpu.id}: 容器 ${cpu.owner}">${cpu.owner.replace(/[^0-9]/g, "").slice(0, 2)}</div>`;
+}
+
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
